@@ -78,15 +78,51 @@ export AIRTABLE_TABLE_NAME="트레이더의 선택"
 
 ## 💻 사용 방법
 
-### mark.py 실행
+### 방법 1: 로컬에서 실행
+
+#### mark.py 실행
 ```bash
 python mark.py
 ```
 
-### us_minervini_scanner_v2.py 실행
+#### us_minervini_scanner_v2.py 실행
 ```bash
 python us_minervini_scanner_v2.py
 ```
+
+### 방법 2: GitHub Actions 자동화 ⭐ (권장)
+
+매일 미국 장마감 후 자동으로 스캔이 실행됩니다!
+
+#### GitHub Secrets 설정 방법
+
+1. **GitHub 레포지토리로 이동**
+   - https://github.com/dongsuki/USsuperpick
+
+2. **Settings 클릭**
+   - 레포지토리 상단 메뉴에서 `Settings` 선택
+
+3. **Secrets and variables > Actions 선택**
+   - 왼쪽 사이드바에서 `Secrets and variables` → `Actions` 클릭
+
+4. **New repository secret 버튼 클릭하여 다음 시크릿들을 추가:**
+
+   | Name | Secret (Value) |
+   |------|----------------|
+   | `FMP_API_KEY` | 당신의 FMP API 키 |
+   | `POLYGON_API_KEY` | 당신의 Polygon API 키 |
+   | `AIRTABLE_API_KEY` | 당신의 Airtable API 키 |
+   | `AIRTABLE_BASE_ID` | 당신의 Airtable Base ID |
+   | `AIRTABLE_TABLE_NAME` | `트레이더의 선택` |
+
+5. **자동 실행 일정**
+   - 📅 월~금요일 미국 동부시간 오후 4시 (장마감 후)
+   - 🔄 자동으로 실행됨
+   - 1️⃣ `us_minervini_scanner_v2.py` 먼저 실행
+   - 2️⃣ `mark.py` 순차 실행
+
+6. **수동 실행**
+   - `Actions` 탭 → `Daily US Stock Scanner` → `Run workflow` 버튼
 
 ## 📊 Minervini 8가지 조건
 

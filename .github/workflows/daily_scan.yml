@@ -1,0 +1,61 @@
+name: Daily US Stock Scanner
+
+on:
+  schedule:
+    # 미국 동부시간 오후 4시 (장마감) = UTC 21:00 (겨울시간 기준)
+    # 크론 표기법: 분 시 일 월 요일
+    - cron: '0 21 * * 1-5'  # 월~금 UTC 21:00 (미국 동부 오후 4시)
+  
+  # 수동 실행도 가능하도록 설정
+  workflow_dispatch:
+
+jobs:
+  scan-and-update:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 체크아웃 코드
+      uses: actions/checkout@v3
+    
+    - name: Python 3.9 설정
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: 필요한 패키지 설치
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: 1단계 - Minervini Scanner 실행
+      env:
+        FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+        AIRTABLE_API_KEY: ${{ secrets.AIRTABLE_API_KEY }}
+        AIRTABLE_BASE_ID: ${{ secrets.AIRTABLE_BASE_ID }}
+        AIRTABLE_TABLE_NAME: ${{ secrets.AIRTABLE_TABLE_NAME }}
+      run: |
+        echo "🚀 Minervini Scanner V2 실행 중..."
+        python us_minervini_scanner_v2.py
+        echo "✅ Minervini Scanner 완료!"
+    
+    - name: 대기 (60초)
+      run: sleep 60
+    
+    - name: 2단계 - Mark 재무 데이터 업데이트
+      env:
+        POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+        AIRTABLE_API_KEY: ${{ secrets.AIRTABLE_API_KEY }}
+        AIRTABLE_BASE_ID: ${{ secrets.AIRTABLE_BASE_ID }}
+        AIRTABLE_TABLE_NAME: ${{ secrets.AIRTABLE_TABLE_NAME }}
+      run: |
+        echo "📊 Mark 재무 데이터 업데이트 실행 중..."
+        python mark.py
+        echo "✅ Mark 업데이트 완료!"
+    
+    - name: 완료 알림
+      run: |
+        echo "🎉 모든 작업 완료!"
+        echo "✅ 1. Minervini Scanner 실행 완료"
+        echo "✅ 2. Mark 재무 데이터 업데이트 완료"
+
