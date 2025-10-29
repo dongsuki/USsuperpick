@@ -1,0 +1,17 @@
+# API 키 설정 예시
+# 환경 변수로 설정하거나 코드에서 직접 입력하세요.
+
+# Financial Modeling Prep API 키
+# https://financialmodelingprep.com/ 에서 발급
+FMP_API_KEY=YOUR_FMP_API_KEY
+
+# Polygon.io API 키 (mark.py 사용 시 필요)
+# https://polygon.io/ 에서 발급
+POLYGON_API_KEY=YOUR_POLYGON_API_KEY
+
+# Airtable 설정 (선택사항)
+# https://airtable.com/ 에서 발급
+AIRTABLE_API_KEY=YOUR_AIRTABLE_API_KEY
+AIRTABLE_BASE_ID=YOUR_BASE_ID
+AIRTABLE_TABLE_NAME=트레이더의 선택
+
