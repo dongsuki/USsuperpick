@@ -307,11 +307,14 @@ def calculate_growth_rates_fmp(ticker: str) -> Dict:
             growth_rates['roe_values'][qkey] = m.get('roe')
             growth_rates['per_values'][qkey] = m.get('peRatio')
             if i == 0:
-                # PEG 후보 필드 다양 — 우선순위로 시도
-                growth_rates['peg_values']['q1'] = (
-                    m.get('pegRatio')
-                    or m.get('priceEarningsToGrowthRatio')
-                )
+                # FMP에서 PEG 시도, 없으면 직접 계산 (PEG = PER / EPS 성장률)
+                peg = m.get('pegRatio') or m.get('priceEarningsToGrowthRatio')
+                if peg is None:
+                    per_q1 = growth_rates['per_values'].get('q1')
+                    eps_growth_q1 = growth_rates['eps_growth'].get('q1')
+                    if per_q1 is not None and eps_growth_q1 is not None and eps_growth_q1 != 0:
+                        peg = per_q1 / eps_growth_q1
+                growth_rates['peg_values']['q1'] = peg
 
         # 연간 ROE / PER (y1~y3)
         for i in range(min(3, len(annual_metrics))):
