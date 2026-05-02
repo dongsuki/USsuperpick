@@ -97,6 +97,9 @@ FIELDS_TO_CREATE = [
 
     # PEG (1)
     ("PEG_최신분기", NUMBER_2DP),
+
+    # NPM 성장률 4분기전 (markmarkmark 마진 개선 점수 1년 비교용)
+    ("NPM성장률_4분기전", NUMBER_2DP),
 ]
 
 

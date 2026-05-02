@@ -144,7 +144,7 @@ def calculate_growth_rates_fmp(ticker: str) -> Dict:
         'eps_values': {'q1': None, 'q2': None, 'q3': None, 'q4': None, 'q5': None, 'q6': None, 'q7': None, 'q8': None, 'y1': None, 'y2': None, 'y3': None, 'y4': None, 'y5': None, 'y6': None},  # EPS 값 확장
         'operating_income_growth': {'q1': None, 'q2': None, 'q3': None, 'y1': None, 'y2': None, 'y3': None},
         'revenue_growth': {'q1': None, 'q2': None, 'q3': None, 'y1': None, 'y2': None, 'y3': None},
-        'npm_growth': {'q1': None, 'q2': None, 'q3': None, 'y1': None, 'y2': None, 'y3': None},
+        'npm_growth': {'q1': None, 'q2': None, 'q3': None, 'q4': None, 'y1': None, 'y2': None, 'y3': None},
         # === 신규: raw values for markmarkmark 평가 시스템 ===
         'revenue_values': {'q1': None, 'q2': None, 'q3': None, 'q4': None, 'q5': None, 'q6': None, 'q7': None, 'q8': None},
         'operating_margin_values': {'q1': None, 'q2': None, 'q3': None, 'y1': None, 'y2': None, 'y3': None},
@@ -199,7 +199,18 @@ def calculate_growth_rates_fmp(ticker: str) -> Dict:
                     year_ago_quarter.get('revenue')
                 )
                 growth_rates['npm_growth'][quarter_key] = safe_growth_rate(current_npm, previous_npm)  # NPM 성장률 추가
-        
+
+        # NPM 성장률 q4 (markmarkmark 마진 개선 점수의 1년 비교용)
+        if len(quarterly_data) >= 4:
+            q4_quarter = quarterly_data[3]
+            year_ago_q4 = find_matching_quarter_data(q4_quarter, quarterly_data)
+            if year_ago_q4:
+                rev_q4 = q4_quarter.get('revenue', 0)
+                rev_ya = year_ago_q4.get('revenue', 0)
+                current_npm_q4 = (q4_quarter.get('netIncome', 0) / rev_q4) * 100 if rev_q4 else None
+                previous_npm_q4 = (year_ago_q4.get('netIncome', 0) / rev_ya) * 100 if rev_ya else None
+                growth_rates['npm_growth']['q4'] = safe_growth_rate(current_npm_q4, previous_npm_q4)
+
         # 추가 분기별 EPS 값만 계산 (q4~q8)
         for i in range(3, min(8, len(quarterly_data))):
             if i < len(quarterly_data):
@@ -504,6 +515,7 @@ def update_airtable(stock_data: List, category: str):
                 'NPM성장률_최신분기': growth_rates['npm_growth']['q1'],
                 'NPM성장률_전분기': growth_rates['npm_growth']['q2'],
                 'NPM성장률_전전분기': growth_rates['npm_growth']['q3'],
+                'NPM성장률_4분기전': growth_rates['npm_growth']['q4'],
                 'NPM성장률_1년': growth_rates['npm_growth']['y1'],
                 'NPM성장률_2년': growth_rates['npm_growth']['y2'],
                 'NPM성장률_3년': growth_rates['npm_growth']['y3'],
