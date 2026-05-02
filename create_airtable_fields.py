@@ -46,6 +46,8 @@ META_URL = f"https://api.airtable.com/v0/meta/bases/{BASE_ID}/tables/{TABLE_ID}/
 # 모든 필드는 number 타입, 소수점 2자리. 매출액만 정수(precision 0)로.
 NUMBER_2DP = {"type": "number", "options": {"precision": 2}}
 NUMBER_INT = {"type": "number", "options": {"precision": 0}}
+CHECKBOX = {"type": "checkbox", "options": {"icon": "check", "color": "greenBright"}}
+SINGLE_TEXT = {"type": "singleLineText"}
 
 FIELDS_TO_CREATE = [
     # 매출액 raw (분기 8개) - 큰 정수라서 precision 0
@@ -100,6 +102,19 @@ FIELDS_TO_CREATE = [
 
     # NPM 성장률 4분기전 (markmarkmark 마진 개선 점수 1년 비교용)
     ("NPM성장률_4분기전", NUMBER_2DP),
+
+    # 이동평균 존 (한국 ma_zone_scanner 정의 동일, scanner_v2가 채움)
+    ("3일선 위", CHECKBOX),
+    ("3존", CHECKBOX),
+    ("8존", CHECKBOX),
+    ("15존", CHECKBOX),
+    ("20존", CHECKBOX),
+    ("33존", CHECKBOX),
+    ("50존", CHECKBOX),
+    ("슈퍼존", CHECKBOX),
+
+    # 한글 종목명 (네이버 크롤링, mark.py가 채움)
+    ("한글명", SINGLE_TEXT),
 ]
 
 

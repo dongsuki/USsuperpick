@@ -188,7 +188,10 @@ class USMinerviniScannerV2:
             
             # 당일 등락률 계산
             daily_change_rate = self.calculate_daily_change_rate(df)
-            
+
+            # 이동평균 존 계산 (markmarkmark 호환)
+            ma_zones = self._calculate_ma_zones(df)
+
             # Minervini 조건용 지표들 (충분한 데이터가 있을 때만)
             minervini_indicators = {}
             if len(df) >= 252:
@@ -215,12 +218,67 @@ class USMinerviniScannerV2:
             return {
                 'momentum_score': momentum_score,
                 'daily_change_rate': daily_change_rate,
+                **ma_zones,
                 **minervini_indicators
             }
-            
+
         except Exception as e:
             return None
-    
+
+    def _calculate_ma_zones(self, df: pd.DataFrame) -> Dict:
+        """
+        현재가가 어느 이동평균선 사이에 있는지 boolean으로 표시.
+        한국 ma_zone_scanner.py와 동일한 정의.
+          3일선 위: 현재가 > MA3
+          3존: MA5 ≤ 현재가 < MA3
+          8존: MA8 ≤ 현재가 < MA5
+          15존: MA15 ≤ 현재가 < MA10
+          20존: MA20 ≤ 현재가 < MA15
+          33존: MA33 ≤ 현재가 < MA20
+          50존: MA50 ≤ 현재가 < MA33
+          슈퍼존: MA100 ≤ 현재가 ≤ MA50
+        """
+        zones = {
+            'zone_3day_above': False,
+            'zone_3': False,
+            'zone_8': False,
+            'zone_15': False,
+            'zone_20': False,
+            'zone_33': False,
+            'zone_50': False,
+            'zone_super': False,
+        }
+        try:
+            close = df['Close']
+            current = close.iloc[-1]
+
+            def ma(n: int):
+                return close.rolling(window=n).mean().iloc[-1] if len(df) >= n else None
+
+            ma3, ma5, ma8, ma10, ma15, ma20, ma33, ma50, ma100 = (
+                ma(3), ma(5), ma(8), ma(10), ma(15), ma(20), ma(33), ma(50), ma(100)
+            )
+
+            if ma3 is not None:
+                zones['zone_3day_above'] = bool(current > ma3)
+            if ma3 is not None and ma5 is not None:
+                zones['zone_3'] = bool(ma5 <= current < ma3)
+            if ma5 is not None and ma8 is not None:
+                zones['zone_8'] = bool(ma8 <= current < ma5)
+            if ma10 is not None and ma15 is not None:
+                zones['zone_15'] = bool(ma15 <= current < ma10)
+            if ma15 is not None and ma20 is not None:
+                zones['zone_20'] = bool(ma20 <= current < ma15)
+            if ma20 is not None and ma33 is not None:
+                zones['zone_33'] = bool(ma33 <= current < ma20)
+            if ma33 is not None and ma50 is not None:
+                zones['zone_50'] = bool(ma50 <= current < ma33)
+            if ma50 is not None and ma100 is not None:
+                zones['zone_super'] = bool(ma100 <= current <= ma50)
+        except Exception:
+            pass
+        return zones
+
     def calculate_momentum_score(self, df: pd.DataFrame) -> float:
         """
         가중 모멘텀 점수 계산 (유연한 버전)
@@ -456,9 +514,11 @@ class USMinerviniScannerV2:
             df = pd.DataFrame(filtered_stocks)
             
             columns_order = [
-                'ticker', 'name', 'sector', 'exchange', 'current_price', 
+                'ticker', 'name', 'sector', 'exchange', 'current_price',
                 'rs_rating', 'momentum_score', 'daily_change_rate', 'market_cap', 'volume',
-                'sma_50', 'sma_150', 'sma_200', 'year_high', 'year_low'
+                'sma_50', 'sma_150', 'sma_200', 'year_high', 'year_low',
+                'zone_3day_above', 'zone_3', 'zone_8', 'zone_15', 'zone_20',
+                'zone_33', 'zone_50', 'zone_super'
             ]
             
             existing_columns = [col for col in columns_order if col in df.columns]
@@ -605,6 +665,15 @@ class USMinerviniScannerV2:
                                 '52주 신고가 비율': round(high_ratio, 1),
                                 'RS순위': round(row['rs_rating'], 1),
                                 '재료명': row['sector'] if pd.notna(row['sector']) else '기타',
+                                # 이동평균 존 (한국 ma_zone_scanner 정의 동일)
+                                '3일선 위': bool(row.get('zone_3day_above', False)),
+                                '3존': bool(row.get('zone_3', False)),
+                                '8존': bool(row.get('zone_8', False)),
+                                '15존': bool(row.get('zone_15', False)),
+                                '20존': bool(row.get('zone_20', False)),
+                                '33존': bool(row.get('zone_33', False)),
+                                '50존': bool(row.get('zone_50', False)),
+                                '슈퍼존': bool(row.get('zone_super', False)),
                             }
                         }
                         records_to_update.append(record_data)
@@ -657,6 +726,15 @@ class USMinerviniScannerV2:
                             '52주 신고가 비율': round(high_ratio, 1),
                             'RS순위': round(row['rs_rating'], 1),
                             '재료명': row['sector'] if pd.notna(row['sector']) else '기타',
+                            # 이동평균 존 (한국 ma_zone_scanner 정의 동일)
+                            '3일선 위': bool(row.get('zone_3day_above', False)),
+                            '3존': bool(row.get('zone_3', False)),
+                            '8존': bool(row.get('zone_8', False)),
+                            '15존': bool(row.get('zone_15', False)),
+                            '20존': bool(row.get('zone_20', False)),
+                            '33존': bool(row.get('zone_33', False)),
+                            '50존': bool(row.get('zone_50', False)),
+                            '슈퍼존': bool(row.get('zone_super', False)),
                         }
                         records_to_create.append(record_data)
                         

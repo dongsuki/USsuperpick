@@ -111,6 +111,34 @@ def get_financials_fmp(ticker: str, period: str = 'quarter') -> List:
         print(f"재무데이터 조회 중 에러 발생 ({ticker}): {str(e)}")
         return []
 
+def get_korean_name_naver(ticker: str) -> Optional[str]:
+    """네이버 미국주식 페이지에서 한글명 가져오기.
+
+    네이버는 미국 종목에 .O 접미사 사용 (예: AAPL → AAPL.O).
+    회사 한글명이 있으면 반환, 없으면 None.
+    """
+    try:
+        url = f"https://api.stock.naver.com/stock/{ticker}.O/basic"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+            'Referer': f'https://m.stock.naver.com/worldstock/stock/{ticker}.O/total',
+            'Accept': 'application/json',
+        }
+        response = requests.get(url, headers=headers, timeout=5)
+        if response.status_code != 200:
+            return None
+        data = response.json()
+        # 네이버 응답: stockName(한글) 또는 stockNameKor 등 키 존재
+        # 우선순위: stockName > stockNameEng (영문이면 fallback)
+        name_kor = data.get('stockName')
+        if name_kor and any('가' <= ch <= '힣' for ch in name_kor):
+            # 한글 1자라도 포함되면 한글명으로 인정
+            return name_kor.strip()
+        return None
+    except Exception:
+        return None
+
+
 def get_key_metrics_fmp(ticker: str, period: str = 'quarter') -> List:
     """FMP key-metrics API 조회 (ROE, PER, PEG)"""
     url = f"https://financialmodelingprep.com/api/v3/key-metrics/{ticker}"
@@ -437,12 +465,14 @@ def update_airtable(stock_data: List, category: str):
     for stock in stock_data:
         try:
             print(f"\n{stock['ticker']} 처리 중...")
-            
+
             growth_rates = calculate_growth_rates_fmp(stock['ticker'])
+            korean_name = get_korean_name_naver(stock['ticker'])
             
             record = {
                 '티커': stock.get('ticker', ''),
                 '종목명': stock.get('name', ''),
+                '한글명': korean_name or '',  # 네이버 한글명 (없으면 빈 문자열)
                 '현재가': float(stock.get('day', {}).get('c', 0)),
                 '등락률': float(stock.get('day', {}).get('todaysChangePerc', 0)),
                 '거래량': int(stock.get('day', {}).get('v', 0)),
