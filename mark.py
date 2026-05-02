@@ -14,6 +14,13 @@ try:
 except ImportError:
     _anthropic_client = None
 
+# yahooquery (EPS Trend + Forward 추정) — optional
+try:
+    from yahooquery import Ticker as YQTicker
+    _yahooquery_available = True
+except ImportError:
+    _yahooquery_available = False
+
 # === API 키 설정 ===
 # 환경 변수에서 API 키를 가져옵니다.
 POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "YOUR_POLYGON_API_KEY")
@@ -119,6 +126,134 @@ def get_financials_fmp(ticker: str, period: str = 'quarter') -> List:
     except Exception as e:
         print(f"재무데이터 조회 중 에러 발생 ({ticker}): {str(e)}")
         return []
+
+def get_yahoo_eps_trend(ticker: str) -> Dict:
+    """Yahoo Finance에서 EPS Trend + 분기/연간 추정 EPS 가져옴.
+
+    반환 구조:
+      {
+        '0q':  {'avg': float, 'year_ago_eps': float, 'growth': float, 'trend': {current/7d/30d/60d/90d}},
+        '+1q': {...},
+        '0y':  {...},
+        '+1y': {...},
+      }
+    실패 시 빈 dict.
+    """
+    if not _yahooquery_available:
+        return {}
+    try:
+        t = YQTicker(ticker)
+        data = t.earnings_trend
+        if not isinstance(data, dict) or ticker not in data:
+            return {}
+        result = {}
+        for item in data[ticker].get('trend', []):
+            period = item.get('period')
+            if period not in ('0q', '+1q', '0y', '+1y'):
+                continue
+            est = item.get('earningsEstimate', {})
+            tr = item.get('epsTrend', {})
+            result[period] = {
+                'avg': est.get('avg'),
+                'year_ago_eps': est.get('yearAgoEps'),
+                'growth': est.get('growth'),  # 분수 형태 (0.51 = 51%)
+                'trend_current': tr.get('current'),
+                'trend_7d': tr.get('7daysAgo'),
+                'trend_30d': tr.get('30daysAgo'),
+                'trend_60d': tr.get('60daysAgo'),
+                'trend_90d': tr.get('90daysAgo'),
+            }
+        return result
+    except Exception as e:
+        print(f"yahoo earnings_trend 실패 ({ticker}): {e}")
+        return {}
+
+
+def get_fmp_analyst_estimates_annual(ticker: str) -> List:
+    """FMP analyst-estimates (annual) — 내후년(+2y) EPS 보충용.
+
+    반환: 가장 최신 연도부터 내림차순 list of dict.
+    """
+    url = f"https://financialmodelingprep.com/api/v3/analyst-estimates/{ticker}"
+    params = {'apikey': FMP_API_KEY, 'period': 'annual', 'limit': 5}
+    try:
+        r = requests.get(url, params=params, timeout=10)
+        if r.status_code != 200:
+            return []
+        data = r.json()
+        if not isinstance(data, list):
+            return []
+        # date 내림차순 (최신이 먼저)
+        return sorted(data, key=lambda x: x.get('date', ''), reverse=True)
+    except Exception as e:
+        print(f"FMP analyst-estimates 실패 ({ticker}): {e}")
+        return []
+
+
+def calculate_forward_valuations(
+    current_price: float,
+    yahoo_data: Dict,
+    fmp_estimates: List,
+) -> Dict:
+    """Forward PE/PEG 계산 (단년 성장률 기준).
+
+    PEG = Forward PE / 단년 성장률(%)
+    """
+    out = {
+        'fwd_pe_0y': None, 'fwd_pe_1y': None, 'fwd_pe_2y': None,
+        'fwd_peg_0y': None, 'fwd_peg_1y': None, 'fwd_peg_2y': None,
+    }
+    if not current_price or current_price <= 0:
+        return out
+
+    # === 올해 (0y) ===
+    eps_0y = yahoo_data.get('0y', {}).get('avg')
+    eps_last = yahoo_data.get('0y', {}).get('year_ago_eps')
+    if eps_0y and eps_0y > 0:
+        out['fwd_pe_0y'] = current_price / eps_0y
+        if eps_last and eps_last != 0:
+            growth_0y = (eps_0y - eps_last) / abs(eps_last) * 100
+            if growth_0y != 0:
+                out['fwd_peg_0y'] = out['fwd_pe_0y'] / growth_0y
+
+    # === 내년 (+1y) ===
+    eps_1y = yahoo_data.get('+1y', {}).get('avg')
+    if eps_1y and eps_1y > 0:
+        out['fwd_pe_1y'] = current_price / eps_1y
+        if eps_0y and eps_0y != 0:
+            growth_1y = (eps_1y - eps_0y) / abs(eps_0y) * 100
+            if growth_1y != 0:
+                out['fwd_peg_1y'] = out['fwd_pe_1y'] / growth_1y
+
+    # === 내후년 (+2y) — FMP에서 ===
+    # FMP는 가장 최신 연도부터 내림차순. fmp_estimates[0]은 +1y, [1]은 +2y가 보통
+    # 단, FMP 응답 시점에 따라 변동 가능 — date 비교로 안전하게 매칭
+    eps_2y_fmp = None
+    if fmp_estimates and eps_1y:
+        # +1y와 매칭되는 FMP 항목 찾고, 그 다음 항목이 +2y
+        for i, est in enumerate(fmp_estimates):
+            est_eps = est.get('estimatedEpsAvg')
+            if est_eps and abs(est_eps - eps_1y) / max(abs(eps_1y), 1e-9) < 0.5:
+                # 매칭 — 다음 인덱스가 +2y (시간순으로 다음 연도)
+                # 단 fmp_estimates는 내림차순이니 i+1이 더 최근... 아니 내림차순이면 i-1이 더 최근
+                # date 기준으로 보면: estimates[0] = 가장 최신 미래 = 더 먼 미래
+                # → +2y는 더 먼 미래라 i보다 작은 인덱스
+                if i - 1 >= 0:
+                    eps_2y_fmp = fmp_estimates[i - 1].get('estimatedEpsAvg')
+                break
+        # 매칭 실패 시 fallback: 두 번째 항목을 +2y로 가정
+        if eps_2y_fmp is None and len(fmp_estimates) >= 2:
+            eps_2y_fmp = fmp_estimates[1].get('estimatedEpsAvg')
+
+    if eps_2y_fmp and eps_2y_fmp > 0:
+        out['fwd_pe_2y'] = current_price / eps_2y_fmp
+        if eps_1y and eps_1y != 0:
+            growth_2y = (eps_2y_fmp - eps_1y) / abs(eps_1y) * 100
+            if growth_2y != 0:
+                out['fwd_peg_2y'] = out['fwd_pe_2y'] / growth_2y
+
+    return out
+
 
 def get_korean_name_llm(ticker: str, english_name: str) -> Optional[str]:
     """Claude Haiku로 한글 음역 생성 (네이버 폴백용).
@@ -527,6 +662,14 @@ def update_airtable(stock_data: List, category: str):
                     korean_name = get_korean_name_llm(ticker, stock.get('name', ''))
 
             growth_rates = calculate_growth_rates_fmp(ticker)
+
+            # Phase 5: EPS Trend + Forward 추정 데이터
+            yahoo_eps = get_yahoo_eps_trend(ticker)
+            fmp_annual_est = get_fmp_analyst_estimates_annual(ticker)
+            current_price_now = float(stock.get('day', {}).get('c', 0))
+            forward_vals = calculate_forward_valuations(
+                current_price_now, yahoo_eps, fmp_annual_est
+            )
             
             record = {
                 '티커': stock.get('ticker', ''),
@@ -666,6 +809,40 @@ def update_airtable(stock_data: List, category: str):
 
                 # PEG (1)
                 'PEG_최신분기': growth_rates['peg_values']['q1'],
+
+                # === Phase 5: EPS Trend (4 카테고리 × 5 시점 = 20개) ===
+                # 현재분기 (0q)
+                '현재분기_현재추정': yahoo_eps.get('0q', {}).get('trend_current'),
+                '현재분기_7일전': yahoo_eps.get('0q', {}).get('trend_7d'),
+                '현재분기_30일전': yahoo_eps.get('0q', {}).get('trend_30d'),
+                '현재분기_60일전': yahoo_eps.get('0q', {}).get('trend_60d'),
+                '현재분기_90일전': yahoo_eps.get('0q', {}).get('trend_90d'),
+                # 다음분기 (+1q)
+                '다음분기_현재추정': yahoo_eps.get('+1q', {}).get('trend_current'),
+                '다음분기_7일전': yahoo_eps.get('+1q', {}).get('trend_7d'),
+                '다음분기_30일전': yahoo_eps.get('+1q', {}).get('trend_30d'),
+                '다음분기_60일전': yahoo_eps.get('+1q', {}).get('trend_60d'),
+                '다음분기_90일전': yahoo_eps.get('+1q', {}).get('trend_90d'),
+                # 현재연도 (0y)
+                '현재연도_현재추정': yahoo_eps.get('0y', {}).get('trend_current'),
+                '현재연도_7일전': yahoo_eps.get('0y', {}).get('trend_7d'),
+                '현재연도_30일전': yahoo_eps.get('0y', {}).get('trend_30d'),
+                '현재연도_60일전': yahoo_eps.get('0y', {}).get('trend_60d'),
+                '현재연도_90일전': yahoo_eps.get('0y', {}).get('trend_90d'),
+                # 내년 (+1y)
+                '내년_현재추정': yahoo_eps.get('+1y', {}).get('trend_current'),
+                '내년_7일전': yahoo_eps.get('+1y', {}).get('trend_7d'),
+                '내년_30일전': yahoo_eps.get('+1y', {}).get('trend_30d'),
+                '내년_60일전': yahoo_eps.get('+1y', {}).get('trend_60d'),
+                '내년_90일전': yahoo_eps.get('+1y', {}).get('trend_90d'),
+
+                # === Phase 5: Forward PE / PEG (단년 성장률 기준) ===
+                '선행PER_올해': forward_vals['fwd_pe_0y'],
+                '선행PER_내년': forward_vals['fwd_pe_1y'],
+                '선행PER_내후년': forward_vals['fwd_pe_2y'],
+                '선행PEG_올해': forward_vals['fwd_peg_0y'],
+                '선행PEG_내년': forward_vals['fwd_peg_1y'],
+                '선행PEG_내후년': forward_vals['fwd_peg_2y'],
             }
             
             if stock.get('primary_exchange'):

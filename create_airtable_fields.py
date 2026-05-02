@@ -115,6 +115,36 @@ FIELDS_TO_CREATE = [
 
     # 한글 종목명 (네이버 크롤링, mark.py가 채움)
     ("한글명", SINGLE_TEXT),
+
+    # === Phase 5: EPS Trend (4 카테고리 × 5 시점 = 20개, Yahoo 출처) ===
+    ("현재분기_현재추정", NUMBER_2DP),
+    ("현재분기_7일전", NUMBER_2DP),
+    ("현재분기_30일전", NUMBER_2DP),
+    ("현재분기_60일전", NUMBER_2DP),
+    ("현재분기_90일전", NUMBER_2DP),
+    ("다음분기_현재추정", NUMBER_2DP),
+    ("다음분기_7일전", NUMBER_2DP),
+    ("다음분기_30일전", NUMBER_2DP),
+    ("다음분기_60일전", NUMBER_2DP),
+    ("다음분기_90일전", NUMBER_2DP),
+    ("현재연도_현재추정", NUMBER_2DP),
+    ("현재연도_7일전", NUMBER_2DP),
+    ("현재연도_30일전", NUMBER_2DP),
+    ("현재연도_60일전", NUMBER_2DP),
+    ("현재연도_90일전", NUMBER_2DP),
+    ("내년_현재추정", NUMBER_2DP),
+    ("내년_7일전", NUMBER_2DP),
+    ("내년_30일전", NUMBER_2DP),
+    ("내년_60일전", NUMBER_2DP),
+    ("내년_90일전", NUMBER_2DP),
+
+    # === Phase 5: Forward PE / PEG (단년 성장률 기준, Yahoo + FMP) ===
+    ("선행PER_올해", NUMBER_2DP),
+    ("선행PER_내년", NUMBER_2DP),
+    ("선행PER_내후년", NUMBER_2DP),
+    ("선행PEG_올해", NUMBER_2DP),
+    ("선행PEG_내년", NUMBER_2DP),
+    ("선행PEG_내후년", NUMBER_2DP),
 ]
 
 
