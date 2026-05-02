@@ -111,6 +111,29 @@ def get_financials_fmp(ticker: str, period: str = 'quarter') -> List:
         print(f"재무데이터 조회 중 에러 발생 ({ticker}): {str(e)}")
         return []
 
+def get_key_metrics_fmp(ticker: str, period: str = 'quarter') -> List:
+    """FMP key-metrics API 조회 (ROE, PER, PEG)"""
+    url = f"https://financialmodelingprep.com/api/v3/key-metrics/{ticker}"
+    params = {
+        'apikey': FMP_API_KEY,
+        'period': period,
+        'limit': 20 if period == 'quarter' else 6
+    }
+
+    try:
+        response = requests.get(url, params=params)
+        if response.status_code == 200:
+            data = response.json()
+            if not data:
+                return []
+            return sorted(data, key=lambda x: x.get('date', ''), reverse=True)
+        else:
+            print(f"key-metrics 조회 실패 ({ticker}): {response.status_code}")
+            return []
+    except Exception as e:
+        print(f"key-metrics 조회 중 에러 발생 ({ticker}): {str(e)}")
+        return []
+
 def calculate_growth_rates_fmp(ticker: str) -> Dict:
     growth_rates = {
         'dates': {
@@ -121,7 +144,14 @@ def calculate_growth_rates_fmp(ticker: str) -> Dict:
         'eps_values': {'q1': None, 'q2': None, 'q3': None, 'q4': None, 'q5': None, 'q6': None, 'q7': None, 'q8': None, 'y1': None, 'y2': None, 'y3': None, 'y4': None, 'y5': None, 'y6': None},  # EPS 값 확장
         'operating_income_growth': {'q1': None, 'q2': None, 'q3': None, 'y1': None, 'y2': None, 'y3': None},
         'revenue_growth': {'q1': None, 'q2': None, 'q3': None, 'y1': None, 'y2': None, 'y3': None},
-        'npm_growth': {'q1': None, 'q2': None, 'q3': None, 'y1': None, 'y2': None, 'y3': None}  # 콤마 추가
+        'npm_growth': {'q1': None, 'q2': None, 'q3': None, 'y1': None, 'y2': None, 'y3': None},
+        # === 신규: raw values for markmarkmark 평가 시스템 ===
+        'revenue_values': {'q1': None, 'q2': None, 'q3': None, 'q4': None, 'q5': None, 'q6': None, 'q7': None, 'q8': None},
+        'operating_margin_values': {'q1': None, 'q2': None, 'q3': None, 'y1': None, 'y2': None, 'y3': None},
+        'net_margin_values': {'q1': None, 'q2': None, 'q3': None, 'q4': None, 'q5': None, 'q6': None, 'q7': None, 'q8': None, 'y1': None, 'y2': None, 'y3': None},
+        'roe_values': {'q1': None, 'q2': None, 'q3': None, 'y1': None, 'y2': None, 'y3': None},
+        'per_values': {'q1': None, 'q2': None, 'q3': None, 'y1': None, 'y2': None, 'y3': None},
+        'peg_values': {'q1': None}
     }
     
     # 분기 데이터 조회
@@ -225,14 +255,71 @@ def calculate_growth_rates_fmp(ticker: str) -> Dict:
                 current_year = annual_data[i]
                 year_key = f'y{i+1}'
                 growth_rates['dates']['years'][year_key] = current_year['calendarYear']
-                
+
                 # EPS 값만 계산
                 current_eps = calculate_eps(
                     current_year.get('netIncome', 0),
                     current_year.get('weightedAverageShsOut', 0)
                 )
                 growth_rates['eps_values'][year_key] = current_eps
-                
+
+        # === 신규: raw values 추출 (markmarkmark 평가 시스템 호환) ===
+        # 분기 매출액 raw 값 (q1~q8) + 분기 순이익률 (q1~q8)
+        for i in range(min(8, len(quarterly_data))):
+            q = quarterly_data[i]
+            qkey = f'q{i+1}'
+            revenue = q.get('revenue')
+            net_income = q.get('netIncome')
+            growth_rates['revenue_values'][qkey] = revenue
+            if revenue and revenue != 0 and net_income is not None:
+                growth_rates['net_margin_values'][qkey] = (net_income / revenue) * 100
+
+        # 분기 영업이익률 (q1~q3)
+        for i in range(min(3, len(quarterly_data))):
+            q = quarterly_data[i]
+            qkey = f'q{i+1}'
+            revenue = q.get('revenue')
+            op_income = q.get('operatingIncome')
+            if revenue and revenue != 0 and op_income is not None:
+                growth_rates['operating_margin_values'][qkey] = (op_income / revenue) * 100
+
+        # 연간 영업이익률 + 순이익률 (y1~y3)
+        for i in range(min(3, len(annual_data))):
+            y = annual_data[i]
+            ykey = f'y{i+1}'
+            revenue = y.get('revenue')
+            op_income = y.get('operatingIncome')
+            net_income = y.get('netIncome')
+            if revenue and revenue != 0:
+                if op_income is not None:
+                    growth_rates['operating_margin_values'][ykey] = (op_income / revenue) * 100
+                if net_income is not None:
+                    growth_rates['net_margin_values'][ykey] = (net_income / revenue) * 100
+
+        # === 신규: ROE / PER / PEG (key-metrics API) ===
+        quarterly_metrics = get_key_metrics_fmp(ticker, 'quarter')
+        annual_metrics = get_key_metrics_fmp(ticker, 'annual')
+
+        # 분기 ROE / PER (q1~q3) + PEG (q1만)
+        for i in range(min(3, len(quarterly_metrics))):
+            m = quarterly_metrics[i]
+            qkey = f'q{i+1}'
+            growth_rates['roe_values'][qkey] = m.get('roe')
+            growth_rates['per_values'][qkey] = m.get('peRatio')
+            if i == 0:
+                # PEG 후보 필드 다양 — 우선순위로 시도
+                growth_rates['peg_values']['q1'] = (
+                    m.get('pegRatio')
+                    or m.get('priceEarningsToGrowthRatio')
+                )
+
+        # 연간 ROE / PER (y1~y3)
+        for i in range(min(3, len(annual_metrics))):
+            m = annual_metrics[i]
+            ykey = f'y{i+1}'
+            growth_rates['roe_values'][ykey] = m.get('roe')
+            growth_rates['per_values'][ykey] = m.get('peRatio')
+
     except Exception as e:
         print(f"성장률 계산 중 에러 발생: {str(e)}")
     return growth_rates
@@ -424,6 +511,57 @@ def update_airtable(stock_data: List, category: str):
                 'NPM성장률_1년(날짜)': growth_rates['dates']['years'].get('y1'),
                 'NPM성장률_2년(날짜)': growth_rates['dates']['years'].get('y2'),
                 'NPM성장률_3년(날짜)': growth_rates['dates']['years'].get('y3'),
+
+                # === 신규: markmarkmark 평가 시스템 호환 필드 (38개) ===
+                # 매출액 raw (분기 8개)
+                '매출액_최신분기': growth_rates['revenue_values']['q1'],
+                '매출액_전분기': growth_rates['revenue_values']['q2'],
+                '매출액_전전분기': growth_rates['revenue_values']['q3'],
+                '매출액_4분기전': growth_rates['revenue_values']['q4'],
+                '매출액_5분기전': growth_rates['revenue_values']['q5'],
+                '매출액_6분기전': growth_rates['revenue_values']['q6'],
+                '매출액_7분기전': growth_rates['revenue_values']['q7'],
+                '매출액_8분기전': growth_rates['revenue_values']['q8'],
+
+                # 영업이익률(%) raw (분기 3 + 연간 3)
+                '영업이익률(%)_최신분기': growth_rates['operating_margin_values']['q1'],
+                '영업이익률(%)_전분기': growth_rates['operating_margin_values']['q2'],
+                '영업이익률(%)_전전분기': growth_rates['operating_margin_values']['q3'],
+                '영업이익률(%)_1년': growth_rates['operating_margin_values']['y1'],
+                '영업이익률(%)_2년': growth_rates['operating_margin_values']['y2'],
+                '영업이익률(%)_3년': growth_rates['operating_margin_values']['y3'],
+
+                # 순이익률 raw (분기 8 + 연간 3)
+                '순이익률_최신분기': growth_rates['net_margin_values']['q1'],
+                '순이익률_전분기': growth_rates['net_margin_values']['q2'],
+                '순이익률_전전분기': growth_rates['net_margin_values']['q3'],
+                '순이익률_4분기전': growth_rates['net_margin_values']['q4'],
+                '순이익률_5분기전': growth_rates['net_margin_values']['q5'],
+                '순이익률_6분기전': growth_rates['net_margin_values']['q6'],
+                '순이익률_7분기전': growth_rates['net_margin_values']['q7'],
+                '순이익률_8분기전': growth_rates['net_margin_values']['q8'],
+                '순이익률_1년': growth_rates['net_margin_values']['y1'],
+                '순이익률_2년': growth_rates['net_margin_values']['y2'],
+                '순이익률_3년': growth_rates['net_margin_values']['y3'],
+
+                # ROE (분기 3 + 연간 3)
+                'ROE_최신분기': growth_rates['roe_values']['q1'],
+                'ROE_전분기': growth_rates['roe_values']['q2'],
+                'ROE_전전분기': growth_rates['roe_values']['q3'],
+                'ROE_1년': growth_rates['roe_values']['y1'],
+                'ROE_2년': growth_rates['roe_values']['y2'],
+                'ROE_3년': growth_rates['roe_values']['y3'],
+
+                # PER (분기 3 + 연간 3)
+                'PER_최신분기': growth_rates['per_values']['q1'],
+                'PER_전분기': growth_rates['per_values']['q2'],
+                'PER_전전분기': growth_rates['per_values']['q3'],
+                'PER_1년': growth_rates['per_values']['y1'],
+                'PER_2년': growth_rates['per_values']['y2'],
+                'PER_3년': growth_rates['per_values']['y3'],
+
+                # PEG (1)
+                'PEG_최신분기': growth_rates['peg_values']['q1'],
             }
             
             if stock.get('primary_exchange'):
