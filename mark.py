@@ -5,6 +5,15 @@ from airtable import Airtable
 import time
 from typing import Dict, List, Optional, Tuple
 
+# Anthropic Claude (한글명 LLM 폴백) — optional dependency
+try:
+    from anthropic import Anthropic
+    _anthropic_client: Optional[Anthropic] = (
+        Anthropic() if os.getenv('ANTHROPIC_API_KEY') else None
+    )
+except ImportError:
+    _anthropic_client = None
+
 # === API 키 설정 ===
 # 환경 변수에서 API 키를 가져옵니다.
 POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "YOUR_POLYGON_API_KEY")
@@ -110,6 +119,41 @@ def get_financials_fmp(ticker: str, period: str = 'quarter') -> List:
     except Exception as e:
         print(f"재무데이터 조회 중 에러 발생 ({ticker}): {str(e)}")
         return []
+
+def get_korean_name_llm(ticker: str, english_name: str) -> Optional[str]:
+    """Claude Haiku로 한글 음역 생성 (네이버 폴백용).
+
+    회사명을 음역(번역 X)해서 한글로 반환. 약어/심볼은 그대로.
+    """
+    if not _anthropic_client or not english_name:
+        return None
+    try:
+        prompt = (
+            "다음 미국 주식 회사명을 한국어로 음역해줘.\n\n"
+            "규칙:\n"
+            "- 번역 금지, 발음대로 음역만\n"
+            "- 결과만 출력 (설명/따옴표/공백 없음)\n"
+            "- 약어(2~4자)는 그대로 (예: AAR → AAR, TSMC → TSMC)\n"
+            "- 회사명 접미사(Inc., Corp., Ltd., Co., plc, S.A. 등)는 제외\n"
+            "- 공식 한국어 표기가 있으면 그것 사용 (예: 애플, 구글, 마이크로소프트)\n\n"
+            f"회사명: {english_name}\n"
+            f"티커: {ticker}\n\n"
+            "한글:"
+        )
+        response = _anthropic_client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=50,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        result = response.content[0].text.strip()
+        # 한글 1자라도 포함되거나 ticker 그대로면 OK
+        if result and (any('가' <= ch <= '힣' for ch in result) or result.upper() == ticker.upper()):
+            return result[:50]
+        return None
+    except Exception as e:
+        print(f"LLM 음역 실패 ({ticker}): {e}")
+        return None
+
 
 def get_korean_name_naver(ticker: str) -> Optional[str]:
     """네이버 미국주식 페이지에서 한글명 가져오기.
@@ -466,8 +510,23 @@ def update_airtable(stock_data: List, category: str):
         try:
             print(f"\n{stock['ticker']} 처리 중...")
 
-            growth_rates = calculate_growth_rates_fmp(stock['ticker'])
-            korean_name = get_korean_name_naver(stock['ticker'])
+            ticker = stock['ticker']
+
+            # 한글명 결정: 기존 Airtable 캐시 > 네이버 > Claude API
+            # (이미 채워진 종목은 API 호출 안 함 → 비용 절감)
+            existing_records = airtable.search('티커', ticker, view='마크미너비니')
+            existing_korean = ''
+            if existing_records:
+                existing_korean = existing_records[0]['fields'].get('한글명', '') or ''
+
+            if existing_korean:
+                korean_name = existing_korean
+            else:
+                korean_name = get_korean_name_naver(ticker)
+                if not korean_name:
+                    korean_name = get_korean_name_llm(ticker, stock.get('name', ''))
+
+            growth_rates = calculate_growth_rates_fmp(ticker)
             
             record = {
                 '티커': stock.get('ticker', ''),
@@ -611,9 +670,8 @@ def update_airtable(stock_data: List, category: str):
             
             if stock.get('primary_exchange'):
                 record['거래소 정보'] = convert_exchange_code(stock['primary_exchange'])
-            
-            # 마크미너비니 뷰에서 해당 티커의 레코드 찾기
-            existing_records = airtable.search('티커', record['티커'], view='마크미너비니')
+
+            # existing_records는 한글명 결정 단계에서 이미 fetch됨 (재사용)
             if existing_records:
                 record_id = existing_records[0]['id']
                 airtable.update(record_id, record)

@@ -44,3 +44,6 @@ Thumbs.db
 config.py
 secrets.py
 
+# 임시 파일 (스크립트 산출물)
+_korean_names_pending.json
+
