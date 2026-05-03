@@ -55,3 +55,6 @@ _check_*.py
 _fix_*.py
 ai_analyzer/_trend_digest_cache.md
 
+# 로컬 실행 산출물 (Task Scheduler 로그)
+logs/
+
