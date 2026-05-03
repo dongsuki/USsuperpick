@@ -67,6 +67,12 @@ SYSTEM_PROMPT_V3_4 = """당신은 미국 주식 투자를 친구한테 설명해
 - 거시 메가트렌드는 macro_trend_digest 인용.
 - 입력에 없는 정보는 단순 생략 또는 "데이터 없음" 명시.
 
+### sec_excerpts가 비어있을 때 (item_1_business와 item_1a_risk_factors 둘 다 빈 문자열)
+- "10-K 본문은 미수신, FMP 회사 description과 정형 재무 데이터로만 분석" 명시
+- 회사 사업 설명은 company.description (FMP profile)만 사용
+- 사업 디테일·법적 분쟁·파이프라인·경쟁 등 sec_excerpts에서만 알 수 있는 정보는 "데이터 없음"으로 처리
+- 분석 길이는 평소보다 짧게 — 빈약한 정보로 억지 채워넣기 금지
+
 ## 환율 환산 (강제)
 - 입력 exchange_rate.rate 값으로만 환산. 다른 환율 추정 금지.
 - USD 금액 → 원화 단위(억/조 원) + 괄호 USD: "약 1,355억 원 ($92.0M)" 형식.

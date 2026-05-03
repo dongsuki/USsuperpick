@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -51,41 +52,85 @@ def fetch_forex_usdkrw(fmp_key: str) -> float:
     return float(r[0]["price"])
 
 
+def _empty_sec(reason: str = "skipped") -> dict:
+    return {
+        "filing_form": "10-K", "filing_date": None, "accession": None, "url": None,
+        "item_1_business": "", "item_1a_risk_factors": "", "fetch_status": reason,
+    }
+
+
+def _sec_get(url: str, *, host: str | None = None, retries: int = 2) -> requests.Response | None:
+    """SEC 호출 헬퍼 — UA + Accept-Encoding + retry. 실패 시 None 반환 (raise 안 함)."""
+    headers = {
+        "User-Agent": SEC_UA,
+        "Accept-Encoding": "gzip, deflate",
+        "Accept": "application/json, text/html;q=0.9, */*;q=0.8",
+    }
+    if host:
+        headers["Host"] = host
+    last_status = None
+    for attempt in range(retries + 1):
+        try:
+            r = requests.get(url, headers=headers, timeout=60)
+            last_status = r.status_code
+            if r.status_code == 200:
+                return r
+            # 403/429: SEC가 IP 차단 — retry 의미 X. 즉시 포기.
+            if r.status_code in (403, 429):
+                print(f"  [SEC] {r.status_code} on {url[:80]}... — fallback without 10-K")
+                return None
+        except requests.RequestException as e:
+            print(f"  [SEC] request error attempt {attempt+1}: {e}")
+        if attempt < retries:
+            time.sleep(2 * (attempt + 1))
+    print(f"  [SEC] all retries failed (last status={last_status})")
+    return None
+
+
 def fetch_latest_10k_excerpts(cik: str) -> dict:
-    """SEC EDGAR에서 최근 10-K accession 찾고 Item 1 / Item 1A 본문 발췌.
+    """SEC EDGAR에서 최근 10-K Item 1 / Item 1A 본문 발췌.
 
-    Args:
-        cik: 회사 CIK 번호 (10자리, 0 padding 포함). FMP /profile에서 받은 값.
-
-    Returns:
-        {filing_form, filing_date, accession, url, item_1_business, item_1a_risk_factors}
+    실패(403, 네트워크 등) 시 빈 dict + fetch_status 명시 — 분석은 계속 진행.
     """
+    if not cik:
+        return _empty_sec("no_cik")
+
     cik_padded = str(cik).zfill(10) if not str(cik).startswith("000") else str(cik)
     submissions_url = f"{SEC_DATA}/submissions/CIK{cik_padded}.json"
-    r = requests.get(submissions_url, headers={"User-Agent": SEC_UA, "Accept": "application/json"}, timeout=30)
-    r.raise_for_status()
-    sub = r.json()
+    r = _sec_get(submissions_url, host="data.sec.gov")
+    if r is None:
+        return _empty_sec("submissions_fetch_failed")
 
-    forms = sub["filings"]["recent"]
+    try:
+        sub = r.json()
+    except ValueError:
+        return _empty_sec("submissions_parse_failed")
+
+    forms = sub.get("filings", {}).get("recent", {})
     accession_10k = None
     filing_date_10k = None
     primary_doc = None
-    for i in range(len(forms["form"])):
+    for i in range(len(forms.get("form", []))):
         if forms["form"][i] == "10-K":
             accession_10k = forms["accessionNumber"][i]
             filing_date_10k = forms["filingDate"][i]
             primary_doc = forms["primaryDocument"][i]
             break
     if not accession_10k:
-        return {"filing_form": "10-K", "filing_date": None, "accession": None,
-                "url": None, "item_1_business": "", "item_1a_risk_factors": ""}
+        return _empty_sec("no_10k_found")
 
     accession_no_dashes = accession_10k.replace("-", "")
-    cik_int = int(cik_padded)  # URL에선 leading zero 제거
+    cik_int = int(cik_padded)
     doc_url = f"{SEC_BASE}/Archives/edgar/data/{cik_int}/{accession_no_dashes}/{primary_doc}"
 
-    r = requests.get(doc_url, headers={"User-Agent": SEC_UA}, timeout=60)
-    r.raise_for_status()
+    r = _sec_get(doc_url, host="www.sec.gov")
+    if r is None:
+        # submissions은 받았지만 본문 fetch만 실패한 경우 — accession 정보는 살림
+        return {
+            "filing_form": "10-K", "filing_date": filing_date_10k, "accession": accession_10k,
+            "url": doc_url, "item_1_business": "", "item_1a_risk_factors": "",
+            "fetch_status": "body_fetch_failed",
+        }
     html = r.text
 
     # HTML → plain text (간단 정제)

@@ -7,8 +7,8 @@ import re
 # 카드 JSON 블럭 추출 패턴 — 본문 마지막의 ```json {...} ``` 블럭
 JSON_CARD_PATTERN = re.compile(r"```json\s*\n(\{.*?\})\s*\n```", re.DOTALL)
 
-# 본문 길이 허용 범위
-MIN_BODY_CHARS = 4000
+# 본문 길이 허용 범위 (SEC 본문 미수신 시 짧을 수 있음)
+MIN_BODY_CHARS = 2500
 MAX_BODY_CHARS = 18000
 
 
