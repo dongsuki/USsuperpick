@@ -663,12 +663,12 @@ def update_airtable(stock_data: List, category: str):
 
             growth_rates = calculate_growth_rates_fmp(ticker)
 
-            # Phase 5: EPS Trend + Forward 추정 데이터
+            # Phase 5: EPS Trend + Forward 추정 데이터 (야후 단독, 통화 일관성 100%)
+            # FMP +2y는 ADR 통화 불일치 위험으로 제외 (사용자 결정)
             yahoo_eps = get_yahoo_eps_trend(ticker)
-            fmp_annual_est = get_fmp_analyst_estimates_annual(ticker)
             current_price_now = float(stock.get('day', {}).get('c', 0))
             forward_vals = calculate_forward_valuations(
-                current_price_now, yahoo_eps, fmp_annual_est
+                current_price_now, yahoo_eps, []
             )
             
             record = {
@@ -836,13 +836,12 @@ def update_airtable(stock_data: List, category: str):
                 '내년_60일전': yahoo_eps.get('+1y', {}).get('trend_60d'),
                 '내년_90일전': yahoo_eps.get('+1y', {}).get('trend_90d'),
 
-                # === Phase 5: Forward PE / PEG (단년 성장률 기준) ===
+                # === Phase 5: Forward PE / PEG (단년 성장률 기준, 야후 단독) ===
                 '선행PER_올해': forward_vals['fwd_pe_0y'],
                 '선행PER_내년': forward_vals['fwd_pe_1y'],
-                '선행PER_내후년': forward_vals['fwd_pe_2y'],
                 '선행PEG_올해': forward_vals['fwd_peg_0y'],
                 '선행PEG_내년': forward_vals['fwd_peg_1y'],
-                '선행PEG_내후년': forward_vals['fwd_peg_2y'],
+                # 선행PER_내후년 / 선행PEG_내후년: ADR 통화 불일치로 제외
             }
             
             if stock.get('primary_exchange'):
