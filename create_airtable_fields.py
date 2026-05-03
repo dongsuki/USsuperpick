@@ -116,6 +116,9 @@ FIELDS_TO_CREATE = [
     # 한글 종목명 (네이버 크롤링, mark.py가 채움)
     ("한글명", SINGLE_TEXT),
 
+    # 최신분기 표기 (예: '2026-Q1' — FMP의 가장 최근 분기)
+    ("최신분기", SINGLE_TEXT),
+
     # === Phase 5: EPS Trend (4 카테고리 × 5 시점 = 20개, Yahoo 출처) ===
     ("현재분기_현재추정", NUMBER_2DP),
     ("현재분기_7일전", NUMBER_2DP),
