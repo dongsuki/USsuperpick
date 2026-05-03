@@ -22,7 +22,10 @@ echo ========================================== >> "%LOG%"
 echo [%date% %time%] AI Analyzer start (auto) >> "%LOG%"
 echo ========================================== >> "%LOG%"
 
-python -m ai_analyzer.analyze --auto >> "%LOG%" 2>&1
+REM --limit 50: 자동 실행 일일 안전판 (대상 뷰 = 종합점수 50+ 약 168종목)
+REM 첫 백필은 약 3~4일 자동 진행, 이후엔 신규 진입 0~5개만 잡혀서 limit 사실상 무관
+REM 한 번에 빠르게 백필하려면: python -m ai_analyzer.analyze --auto --limit 0
+python -m ai_analyzer.analyze --auto --limit 50 >> "%LOG%" 2>&1
 set EXIT_CODE=%ERRORLEVEL%
 
 echo ========================================== >> "%LOG%"

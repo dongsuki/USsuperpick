@@ -11,8 +11,8 @@ TABLE_ID_DEFAULT = "tbljCB2CnDe2eWB3M"
 
 
 def find_record_by_ticker(ticker: str, *, base_id: str = BASE_ID_DEFAULT,
-                          table_id: str = TABLE_ID_DEFAULT) -> str | None:
-    """티커로 record id 찾기. 없으면 None."""
+                          table_id: str = TABLE_ID_DEFAULT) -> dict | None:
+    """티커로 record 전체 dict 찾기 (id + fields). 없으면 None."""
     pat = os.environ.get("AIRTABLE_PAT") or os.environ.get("AIRTABLE_API_KEY")
     if not pat:
         raise RuntimeError("AIRTABLE_PAT (or AIRTABLE_API_KEY) not set")
@@ -25,13 +25,14 @@ def find_record_by_ticker(ticker: str, *, base_id: str = BASE_ID_DEFAULT,
     )
     r.raise_for_status()
     records = r.json().get("records", [])
-    return records[0]["id"] if records else None
+    return records[0] if records else None
 
 
 def update_ai_fields(record_id: str, body: str, card: dict, *,
+                     latest_quarter: str = "",
                      base_id: str = BASE_ID_DEFAULT,
                      table_id: str = TABLE_ID_DEFAULT) -> dict:
-    """6개 신규 필드 PATCH."""
+    """7개 신규 필드 PATCH (AI분석_분석분기 포함)."""
     pat = os.environ.get("AIRTABLE_PAT") or os.environ.get("AIRTABLE_API_KEY")
     if not pat:
         raise RuntimeError("AIRTABLE_PAT (or AIRTABLE_API_KEY) not set")
@@ -46,6 +47,7 @@ def update_ai_fields(record_id: str, body: str, card: dict, *,
         "AI분석_지속성점수": int(card["durability_score"]),
         "AI분석_갱신일": str(date.today()),
         "AI분석_데이터출처": data_sources_str,
+        "AI분석_분석분기": latest_quarter,  # 트리거 판단용 — 다음 실행 시 비교
     }
 
     url = f"https://api.airtable.com/v0/{base_id}/{table_id}/{record_id}"

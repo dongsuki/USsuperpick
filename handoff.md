@@ -1,7 +1,7 @@
-# USsuperpick × markmarkmark 통합 작업 인계 문서 (Phase 1~5 완료)
+# USsuperpick × markmarkmark 통합 작업 인계 문서 (Phase 1~6 완료)
 
-**최종 갱신**: 2026-05-03
-**작업 진행률**: Phase 1~4 main 머지 완료, Phase 5 PR #2 open 상태
+**최종 갱신**: 2026-05-04
+**작업 진행률**: Phase 1~4 main 머지 완료, Phase 5 PR #2 open + Phase 6 추가 commit, **Phase 6(AI 분석)** 코드 완성 + 첫 자동 실행 대기 (KST 2026-05-05 07:30)
 
 ---
 
@@ -256,27 +256,138 @@ src/
 
 ---
 
+## 🆕 Phase 6 — AI 종목 분석 (2026-05-04 완료)
+
+### 목표
+사용자 투자 철학("메가트렌드 속 병목 + 수혜 + 이익 실재 + 지속성")에 맞춰 미국 종목별로 5섹션 본문 + JSON 카드 자동 생성 → Airtable 저장 → markmarkmark UI 노출.
+
+### 데이터 출처 정책 (Layer 1~3, 외부 웹리서치 0)
+- **L1 회사 재무·숫자**: FMP API (profile, income/cash-flow/ratios/key-metrics 분기 8 + 연간 3, analyst-estimates)
+- **L2 회사 자기 진술**: SEC 10-K Item 1 (Business) ~12K자 + Item 1A (Risk Factors) ~8K자 본문 발췌
+- **L3 거시 메가트렌드**: 한국 증권가 다이제스트 (`연구/info/digest/output/*/원본_핵심정리.md`) 거시 인용
+- **환율**: FMP `/quote/USDKRW` 실시간
+
+### v3.5 시스템 프롬프트 (확정)
+- 친구한테 설명하듯 풀어 쓰기 (분석가 톤 금지)
+- 전문용어(PAH, prostacyclin, PRINT 등) 등장 즉시 괄호로 풀어 설명 + 일상 비유
+- 약어·문서명 첫 등장 시 풀이 ("10-K(미국 SEC 연차보고서)", "FDA(미 식품의약국)" 등)
+- **출처 메타 표현 본문에서 절대 금지** ("FMP에 따르면", "10-K에서", "macro_trend_digest 데이터는..." 등) — `data_sources` JSON 카드에만
+- "현재 주가" 금지 → "작성 시점 주가" (글이 며칠 후 읽혀도 misleading 방지)
+- 범위·연결 표기 풀어쓰기 강제 (`~`, `-`, `--` 사용 금지 — markdown strikethrough 우려) → "에서 까지", "·"
+- 출력: 5섹션 본문 (~5K~12K자) + 마지막에 JSON 요약 카드
+
+### 5섹션 구조
+1. **이 회사 뭐 하는 곳?** (~2,500자) — 질환·기술 원리부터 비유로 풀고 시작
+2. **메가트렌드 속 어디 — 병목 잡았나?** (~3,500자, 가장 길게) — 거시 흐름, 병목 정의, 점유 검증, 일시적/구조적 판단
+3. **이익이 진짜 나고 있나?** (~1,800자) — 분기별 trajectory
+4. **이게 계속 갈까? — 지속성** (~1,500자) — 시대 흐름 + 약점
+5. **지금 사도 되나? — 밸류에이션 + 모니터링** (~1,500자)
+
+### 모듈 구조 (`ai_analyzer/`)
+- `analyze.py` — entry point (--ticker / --auto / --backfill-all / --dry-run / --limit)
+- `prompts.py` — v3.5 시스템 프롬프트
+- `data_packager.py` — FMP fetch + SEC 10-K 발췌(UA 헤더) + 환율 + 다이제스트 통합
+- `llm_client.py` — Anthropic Sonnet 4.6 호출 + 재시도 + 비용 추적
+- `validator.py` — JSON 카드 파싱 + 점수 0~10 + 본문 길이 + **normalize_body 후처리** (현재→작성시점, 출처 메타 청소)
+- `airtable_writer.py` — 7개 신규 필드 PATCH (UTF-8 charset)
+- `trigger.py` — "신규 진입 + 분기 변경"만 트리거
+
+### 트리거 정책 (확정 — stale 없음)
+| 조건 | 의미 | 액션 |
+|---|---|---|
+| 1. 신규 진입 (new_entry) | `AI분석_본문`이 비어있음 | 분석 |
+| 2. 분기실적 갱신 (earnings_update) | `최신분기` ≠ `AI분석_분석분기` | 분석 |
+| 3. 그 외 | — | skip |
+
+→ 같은 분기 데이터 안에선 절대 재분석 안 함. mark.py가 새 분기로 채울 때만 트리거.
+
+### Airtable 신규 필드 (7개)
+| 필드명 | 타입 | 용도 |
+|---|---|---|
+| AI분석_본문 | Long text (마크다운) | UI 카드 본문 |
+| AI분석_요약3줄 | Long text | UI 카드 상단 미리보기 |
+| AI분석_병목점수 | Number 0-10 | 필터·정렬 |
+| AI분석_지속성점수 | Number 0-10 | 필터·정렬 |
+| AI분석_갱신일 | Date | 신선도 표시 |
+| AI분석_데이터출처 | Single line | 투명성 |
+| **AI분석_분석분기** | Single line | **트리거 판단용 — 다음 호출 시 mark.py의 최신분기와 비교** |
+
+### 분석 대상 뷰
+**`viwioKkozk9MTIT84`** — "종합점수(재무) 50+ 뷰" (사용자 결정)
+- 종합점수 N/A 종목은 mark.py가 재무 데이터 못 채운 케이스 → 분석 가치 낮아 제외
+- 현재 약 168 records, 4개 분석 완료(LQDA·SNDK·LITE·BE), 164개 백필 대기
+
+### 자동화 — 로컬 Task Scheduler (GitHub Actions ❌)
+GitHub Actions IP 대역에서 SEC EDGAR가 403 차단 → 10-K 본문 수신 실패 → 분석 퀄리티 큰 차이.
+**로컬 PC IP에서는 SEC 정상 fetch**. 로컬 Task Scheduler가 답.
+
+| 구성 | 위치 | 트리거 |
+|---|---|---|
+| `daily_scan.yml` | GitHub Actions | 평일 UTC 21:00 — scanner_v2 + mark.py만 (ai_analyzer 제거) |
+| `run_ai_analyzer.bat` | 로컬 PC | Windows Task Scheduler — 평일 KST 07:30 |
+| `ai_analyzer.yml` | GitHub Actions | workflow_dispatch 수동 백필·실험용 (보존) |
+
+**run_ai_analyzer.bat 핵심**:
+- `python -m ai_analyzer.analyze --auto --limit 50`
+- 로그: `logs/ai_analyzer_YYYYMMDD_HHMMSS.log`
+- 환경변수는 `setx`로 사용자 단위 영구 등록 (ANTHROPIC/FMP/AIRTABLE_API_KEY + AIRTABLE_BASE_ID)
+
+**Task Scheduler 등록**:
+```
+schtasks /create /tn "USsuperpick AI Analyzer" /tr "...run_ai_analyzer.bat" /sc weekly /d MON,TUE,WED,THU,FRI /st 07:30 /f
+```
+
+### markmarkmark UI 통합 (옵션 C 규칙)
+- `CompanyAnalysisAccordion` 한 컴포넌트로 한국·미국 모두 처리
+  - 한국: `stock['기업분석_내용']`
+  - 미국: `stock['AI분석_본문']` + `summary3Lines` + `analysisDate` props
+- `StockHeader`: 미국 종목에 한해 병목/지속성 점수 배지 + 갱신일 표시
+- `CompanyAnalysisAccordion` 마크다운 렌더링:
+  - `remarkGfm`에 `{ singleTilde: false }` (단일 ~ strikethrough 버그 차단)
+  - 펼침 시 상단에 작성일 + 요약3줄 헤더
+  - 닫힘 시 펼치기 버튼에 첫 줄 미리보기
+  - 줄간격 1.85, 한국어 본문 호흡감 강화
+
+### 비용 (Sonnet 4.6 기준)
+- 종목당 약 $0.13~0.15 (≈180~210원), 시간 100~130초
+- 168종목 첫 백필 약 $25 (≈3.5만원), ~5.5시간
+- 정상 운영 (분기마다 트리거 + 신규 진입): 월 ~$10 (≈1.5만원) 미만
+
+### 검증 완료 사항
+- ✅ FMP 6 endpoint fetch (profile/income/cashflow/ratios/key-metrics/analyst-estimates)
+- ✅ SEC 10-K User-Agent 헤더 통과 (로컬 PC IP)
+- ✅ Sonnet 4.6 호출 + 재시도 + 비용 추적
+- ✅ 한글 필드명 PATCH (UTF-8 charset 명시 필수, PowerShell의 cp949 변환 회피 위해 Python `requests.json=` 사용)
+- ✅ 트리거 분기 비교 로직 (4종목 백필 후 dry-run에서 정상 skip 확인)
+- ✅ markmarkmark UI 마크다운 렌더링 + 작성일 + 요약3줄
+
+### 첫 자동 실행 (예정)
+**2026-05-05 (화) KST 07:30** — Task Scheduler가 처음 발동.
+- limit 50 → 첫 50종목 백필 → 약 $7.5 (≈1만원) + ~1.5시간
+- 약 3~4일에 걸쳐 자동 백필 완료 → 그 후엔 신규 진입 + 분기 갱신만 처리
+- 빠르게 한 번에 백필하려면: `python -m ai_analyzer.analyze --auto --limit 0` 수동 실행 (~$25, ~5.5시간)
+
+---
+
 ## 🚧 진행 중 / 미완료 / 결정 보류
 
 ### PR #2 머지 결정 보류 중
-🔗 https://github.com/dongsuki/markmarkmark/pull/2
+🔗 https://github.com/dongsuki/markmarkmark/pull/2 (phase-5-eps-trend 브랜치)
+
+PR #2에 Phase 6 변경(미국 페이지 갱신시간 + 매출 차트 통화 + AI 분석 카드 + 마크다운 가독성 + 작성일/요약3줄/singleTilde 수정) 포함됨.
 
 머지 시:
-- main에 Phase 5 모든 변경 적용
+- main에 Phase 5+6 모든 변경 적용
 - Netlify production 자동 배포 (~3분)
-- 한국 사용자 사이트에 미국 페이지 EPS Trend / 선행 PEG 필터 / 한국식 시총 / 적자 라벨 / ADR 통화 라벨 모두 적용
-- 한국 페이지 영향 없음 (isUSMarket 체크)
+- 한국 페이지 영향 0 (isUSMarket 체크 + 옵션 C 규칙 준수)
 
-### 진행 중인 GitHub Actions 워크플로우
-- Run ID: `25272264871` (UTC 06:44 시작)
-- 보고통화(reportedCurrency) 필드 채우는 첫 워크플로우
-- 끝나면 ADR 종목들 차트에 "(TWD · 본국 통화)" 자동 표시
-- 다음 세션 시작 시 워크플로우 결과 확인 필요
+### 보안 후속 작업 (rotate 필수)
+이번 세션에서 채팅에 노출된 키들 — **모두 revoke + 새 발급 → setx 재실행**:
+1. **ANTHROPIC_API_KEY** `sk-ant-api03-Q2yN77S23dcmq6...` (사용자 직접 공유)
+2. **AIRTABLE_PAT** `pate1KcLxphDwMihn.2a5c8...` (이전 + 이번 세션 사용)
+3. **FMP_API_KEY** `EApxNJTRwcXOrhy2IUqSeKV0gyH8gans` (이전 + 이번 세션 사용)
 
-### 보안 후속 작업
-- Airtable PAT `pate1KcLxphDwMihn...` revoke
-- FMP API key `EApxNJTRwcXOrhy2IUqSeKV0gyH8gans` rotate
-- GitHub Secrets에 새 값 등록
+각 발급처에서 revoke → 새 발급 → 사용자 PC `setx` 재실행 + GitHub Secrets 갱신.
 
 ---
 

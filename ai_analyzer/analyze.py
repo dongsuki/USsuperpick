@@ -60,9 +60,9 @@ def analyze_ticker(ticker: str, fmp_key: str, *, dry_run: bool = False) -> dict:
         except ValidationError as e2:
             print(f"  [VALIDATION FAIL #2] {e2}")
             if not dry_run:
-                rid = find_record_by_ticker(ticker)
-                if rid:
-                    mark_failed(rid, str(e2))
+                rec = find_record_by_ticker(ticker)
+                if rec:
+                    mark_failed(rec["id"], str(e2))
             return {
                 "ticker": ticker, "status": "validation_failed",
                 "reason": str(e2), "duration_sec": result.duration_sec,
@@ -79,14 +79,16 @@ def analyze_ticker(ticker: str, fmp_key: str, *, dry_run: bool = False) -> dict:
             "cost_usd": result.cost_usd(), "duration_sec": result.duration_sec,
         }
 
-    # Airtable update
-    rid = find_record_by_ticker(ticker)
-    if not rid:
+    # Airtable update — record + 현재 최신분기 함께 fetch
+    rec = find_record_by_ticker(ticker)
+    if not rec:
         print(f"  [SKIP] {ticker} record not found in Airtable")
         return {"ticker": ticker, "status": "record_not_found"}
 
-    update_ai_fields(rid, body, card)
-    print(f"  [OK] Airtable updated (record={rid})")
+    rid = rec["id"]
+    latest_quarter = (rec.get("fields", {}).get("최신분기") or "").strip()
+    update_ai_fields(rid, body, card, latest_quarter=latest_quarter)
+    print(f"  [OK] Airtable updated (record={rid}, quarter={latest_quarter or 'N/A'})")
     return {
         "ticker": ticker, "status": "ok", "body_chars": len(body),
         "bottleneck": card["bottleneck_score"], "durability": card["durability_score"],

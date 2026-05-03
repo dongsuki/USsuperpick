@@ -1,17 +1,23 @@
-"""분석 실행 여부 판단 — 신규 진입 + 분기실적 발표 후 갱신."""
+"""분석 실행 여부 판단.
+
+트리거 정책 (사용자 결정):
+1. 신규 진입 (new_entry) — AI분석_본문이 비어있음
+2. 분기실적 갱신 (earnings_update) — 'AI분석_분석분기'(마지막 분석 시점에 사용된 최신분기 값)와
+   현재 '최신분기'(mark.py가 매일 채움)가 다름 → 새 분기 데이터가 들어왔다는 신호
+그 외 = skip. stale(주기적 갱신) 정책 없음.
+"""
 from __future__ import annotations
 
 import os
-from datetime import date, datetime, timedelta
 from typing import Literal
 
 import requests
 
 BASE_ID_DEFAULT = os.environ.get("AIRTABLE_BASE_ID", "appAh82iPV3cH6Xx5")
 TABLE_ID_DEFAULT = "tbljCB2CnDe2eWB3M"
-VIEW_ID_DEFAULT = "viwtY7XrICnpAgyvY"  # 마크미너비니 뷰
+VIEW_ID_DEFAULT = "viwioKkozk9MTIT84"  # 종합점수(재무) 50+ 뷰 (N/A 제외, AI 분석 대상)
 
-TriggerReason = Literal["new_entry", "earnings_update", "stale", "skip"]
+TriggerReason = Literal["new_entry", "earnings_update", "skip"]
 
 
 def list_view_records(view_id: str = VIEW_ID_DEFAULT,
@@ -43,42 +49,23 @@ def list_view_records(view_id: str = VIEW_ID_DEFAULT,
     return records
 
 
-def should_analyze(record: dict, *, stale_days: int = 90) -> tuple[TriggerReason, str]:
-    """이 record를 분석해야 하는지 판단."""
+def should_analyze(record: dict) -> tuple[TriggerReason, str]:
+    """record가 분석 대상인지 판단.
+
+    Returns:
+        (reason, message) — reason in {"new_entry", "earnings_update", "skip"}
+    """
     fields = record.get("fields", {})
     ai_body = fields.get("AI분석_본문", "")
-    ai_updated = fields.get("AI분석_갱신일")
-    latest_quarter = fields.get("최신분기")  # 예: "2026-Q1"
-    update_date = fields.get("업데이트 날짜")  # mark.py가 매일 갱신
+    ai_analyzed_quarter = (fields.get("AI분석_분석분기") or "").strip()
+    current_quarter = (fields.get("최신분기") or "").strip()
 
-    # 1. 본문 비어있음 → 신규 진입
+    # 1. 신규 진입
     if not ai_body or not ai_body.strip():
         return "new_entry", "AI 분석 없음 (신규 진입)"
 
-    # 2. 분기실적 발표 후 갱신 필요
-    # 최신분기가 ai_updated 이후로 변경됐는지 확인
-    if latest_quarter and ai_updated:
-        # 최신분기 종료일 + 60일 (실적 발표 늦은 케이스 포함) > ai_updated 이면 갱신 필요
-        try:
-            year_str, q_str = latest_quarter.split("-Q")
-            year = int(year_str)
-            q = int(q_str)
-            quarter_end = {1: f"{year}-03-31", 2: f"{year}-06-30",
-                           3: f"{year}-09-30", 4: f"{year}-12-31"}[q]
-            quarter_release_deadline = (datetime.fromisoformat(quarter_end) + timedelta(days=60)).date()
-            ai_dt = datetime.fromisoformat(ai_updated[:10]).date()
-            if quarter_release_deadline > ai_dt:
-                return "earnings_update", f"{latest_quarter} 실적 갱신 필요 (마지막 분석 {ai_updated})"
-        except (ValueError, KeyError):
-            pass
+    # 2. 분기 변경 — mark.py가 새 분기 데이터를 채워 넣었으면 갱신
+    if current_quarter and ai_analyzed_quarter != current_quarter:
+        return "earnings_update", f"분기 변경: {ai_analyzed_quarter or '(없음)'} → {current_quarter}"
 
-    # 3. 너무 오래된 분석 → stale 갱신
-    if ai_updated:
-        try:
-            ai_dt = datetime.fromisoformat(ai_updated[:10]).date()
-            if (date.today() - ai_dt).days > stale_days:
-                return "stale", f"마지막 분석 {ai_updated} ({stale_days}일 초과)"
-        except ValueError:
-            pass
-
-    return "skip", "최근 분석됨"
+    return "skip", "분기 변경 없음"
