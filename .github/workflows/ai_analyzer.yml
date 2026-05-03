@@ -1,0 +1,82 @@
+name: AI Stock Analyzer (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "실행 모드"
+        type: choice
+        options:
+          - auto              # 트리거 종목만 (신규+분기실적+stale)
+          - backfill-all      # 뷰 전체 강제 분석 (대량 비용)
+          - tickers           # 아래 tickers 입력값만 처리
+        default: auto
+      tickers:
+        description: "특정 티커 (콤마 구분, 예: LQDA,NVDA,TSM). mode=tickers일 때만 사용"
+        type: string
+        default: ""
+      limit:
+        description: "처리 종목 수 상한 (0=무제한, mode=auto/backfill-all에서 사용)"
+        type: number
+        default: 5
+      dry_run:
+        description: "Dry run (Airtable 안 씀, 비용·동작만 검증)"
+        type: boolean
+        default: false
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360  # 6시간 (대량 백필 대비)
+
+    steps:
+      - name: 체크아웃
+        uses: actions/checkout@v3
+
+      - name: Python 3.9 설정
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: 패키지 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: AI 분석 실행
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          AIRTABLE_API_KEY: ${{ secrets.AIRTABLE_API_KEY }}
+          AIRTABLE_BASE_ID: ${{ secrets.AIRTABLE_BASE_ID }}
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+        run: |
+          set -e
+          MODE="${{ github.event.inputs.mode }}"
+          TICKERS="${{ github.event.inputs.tickers }}"
+          LIMIT="${{ github.event.inputs.limit }}"
+          DRY_RUN="${{ github.event.inputs.dry_run }}"
+
+          ARGS=""
+          if [ "$DRY_RUN" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+
+          if [ "$MODE" = "tickers" ]; then
+            if [ -z "$TICKERS" ]; then
+              echo "ERROR: mode=tickers인데 tickers 비어있음"; exit 1
+            fi
+            IFS=',' read -ra TS <<< "$TICKERS"
+            for t in "${TS[@]}"; do
+              t_trim=$(echo "$t" | xargs)
+              if [ -n "$t_trim" ]; then
+                echo "▶ $t_trim 분석 중..."
+                python -m ai_analyzer.analyze --ticker "$t_trim" $ARGS
+              fi
+            done
+          elif [ "$MODE" = "backfill-all" ]; then
+            python -m ai_analyzer.analyze --backfill-all --limit "$LIMIT" $ARGS
+          else
+            python -m ai_analyzer.analyze --auto --limit "$LIMIT" $ARGS
+          fi
+
+      - name: 완료
+        run: echo "✅ AI 분석 워크플로우 완료"
