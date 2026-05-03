@@ -47,3 +47,11 @@ secrets.py
 # 임시 파일 (스크립트 산출물)
 _korean_names_pending.json
 
+# Phase 6: ai_analyzer 1회용 검증 스크립트·캐시
+_lqda_*.txt
+_lqda_*.md
+_lqda_*.py
+_check_*.py
+_fix_*.py
+ai_analyzer/_trend_digest_cache.md
+
