@@ -360,6 +360,7 @@ def calculate_growth_rates_fmp(ticker: str) -> Dict:
         'per_values': {'q1': None, 'q2': None, 'q3': None, 'y1': None, 'y2': None, 'y3': None},
         'peg_values': {'q1': None},
         'latest_quarter': None,  # 최신분기 표기 (예: '2026-Q1')
+        'reported_currency': None,  # FMP income-statement reportedCurrency (예: 'USD', 'TWD', 'JPY')
     }
     
     # 분기 데이터 조회
@@ -368,12 +369,14 @@ def calculate_growth_rates_fmp(ticker: str) -> Dict:
         return growth_rates
 
     # 최신분기 표기 ('2026-Q1' 형식, markmarkmark formatQuarter 호환)
+    # + 보고통화 추출 (ADR이면 본국 통화: TWD/JPY 등)
     if quarterly_data:
         latest = quarterly_data[0]
         cal_year = latest.get('calendarYear')
         period = latest.get('period')  # FMP는 'Q1'/'Q2'/'Q3'/'Q4' 또는 'FY' 반환
         if cal_year and period and period != 'FY':
             growth_rates['latest_quarter'] = f"{cal_year}-{period}"
+        growth_rates['reported_currency'] = latest.get('reportedCurrency')
 
     # 연간 데이터 조회
     annual_data = get_financials_fmp(ticker, 'annual')
@@ -685,6 +688,7 @@ def update_airtable(stock_data: List, category: str):
                 '종목명': stock.get('name', ''),
                 '한글명': korean_name or '',  # 네이버 한글명 (없으면 빈 문자열)
                 '최신분기': growth_rates.get('latest_quarter') or '',  # FMP 가장 최근 분기 (예: '2026-Q1')
+                '보고통화': growth_rates.get('reported_currency') or '',  # FMP reportedCurrency (ADR은 본국 통화)
                 '현재가': float(stock.get('day', {}).get('c', 0)),
                 '등락률': float(stock.get('day', {}).get('todaysChangePerc', 0)),
                 '거래량': int(stock.get('day', {}).get('v', 0)),
