@@ -31,7 +31,12 @@ AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY", "YOUR_AIRTABLE_API_KEY")
 SOURCE_BASE_ID = os.getenv("AIRTABLE_BASE_ID", "YOUR_BASE_ID")
 TARGET_BASE_ID = os.getenv("AIRTABLE_BASE_ID", "YOUR_BASE_ID")
 SOURCE_TABLE_NAME = os.getenv("AIRTABLE_TABLE_NAME", "트레이더의 선택")
-SOURCE_VIEW_NAME = "마크미너비니"
+# 티커 목록을 읽어올 뷰.
+# 과거 "마크미너비니" 뷰는 사용자가 손으로 건 「활성」 체크박스 필터 때문에 0개를 반환했고,
+# 그 결과 mark.py가 처리할 티커를 못 받아 재무 데이터가 전혀 채워지지 않았다(조용한 무실행).
+# → 스캐너가 만든 전체 종목이 그대로 들어있는 Grid view(viwphkVArHJVEtIfq)에서 읽는다.
+# 필요하면 환경변수 AIRTABLE_SOURCE_VIEW 로 다른 뷰(이름 또는 ID)를 지정할 수 있다.
+SOURCE_VIEW_NAME = os.getenv("AIRTABLE_SOURCE_VIEW", "viwphkVArHJVEtIfq")
 TARGET_TABLE_NAME = os.getenv("AIRTABLE_TABLE_NAME", "트레이더의 선택")
 
 def get_tickers_from_airtable() -> List[str]:
@@ -661,7 +666,7 @@ def update_airtable(stock_data: List, category: str):
 
             # 한글명 결정: 기존 Airtable 캐시 > 네이버 > Claude API
             # (이미 채워진 종목은 API 호출 안 함 → 비용 절감)
-            existing_records = airtable.search('티커', ticker, view='마크미너비니')
+            existing_records = airtable.search('티커', ticker, view=SOURCE_VIEW_NAME)
             existing_korean = ''
             if existing_records:
                 existing_korean = existing_records[0]['fields'].get('한글명', '') or ''
@@ -695,6 +700,10 @@ def update_airtable(stock_data: List, category: str):
                 '시가총액': float(stock.get('market_cap', 0)),
                 '업데이트 날짜': current_date,
                 '분류': category,
+                # 재무 데이터를 채운 종목을 '활성'으로 표시한다.
+                # 프론트("마크미너비니" 뷰 viwtY7XrICnpAgyvY)가 활성=true 로 필터하므로,
+                # 이 값이 세팅돼야 미국주식 페이지에 노출된다.
+                '활성': True,
 
                 # EPS 값 추가
                 'EPS_최신분기': growth_rates['eps_values']['q1'],
