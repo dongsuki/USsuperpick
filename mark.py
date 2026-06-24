@@ -151,6 +151,16 @@ def get_yahoo_eps_trend(ticker: str) -> Dict:
         data = t.earnings_trend
         if not isinstance(data, dict) or ticker not in data:
             return {}
+        # yahooquery가 일부 외국 ADR에 대해 추정치를 숫자가 아닌 값(문자열/NaN 등)으로
+        # 반환하면 Airtable 숫자 컬럼이 거부(422)하여 레코드 전체 업데이트가 실패한다.
+        # → 여기서 숫자로 안전 변환하고, 변환 불가/NaN은 None 으로 정리한다.
+        def num(v):
+            try:
+                f = float(v)
+            except (TypeError, ValueError):
+                return None
+            return f if f == f and f not in (float('inf'), float('-inf')) else None  # NaN/Inf 제거
+
         result = {}
         for item in data[ticker].get('trend', []):
             period = item.get('period')
@@ -159,14 +169,14 @@ def get_yahoo_eps_trend(ticker: str) -> Dict:
             est = item.get('earningsEstimate', {})
             tr = item.get('epsTrend', {})
             result[period] = {
-                'avg': est.get('avg'),
-                'year_ago_eps': est.get('yearAgoEps'),
-                'growth': est.get('growth'),  # 분수 형태 (0.51 = 51%)
-                'trend_current': tr.get('current'),
-                'trend_7d': tr.get('7daysAgo'),
-                'trend_30d': tr.get('30daysAgo'),
-                'trend_60d': tr.get('60daysAgo'),
-                'trend_90d': tr.get('90daysAgo'),
+                'avg': num(est.get('avg')),
+                'year_ago_eps': num(est.get('yearAgoEps')),
+                'growth': num(est.get('growth')),  # 분수 형태 (0.51 = 51%)
+                'trend_current': num(tr.get('current')),
+                'trend_7d': num(tr.get('7daysAgo')),
+                'trend_30d': num(tr.get('30daysAgo')),
+                'trend_60d': num(tr.get('60daysAgo')),
+                'trend_90d': num(tr.get('90daysAgo')),
             }
         return result
     except Exception as e:
