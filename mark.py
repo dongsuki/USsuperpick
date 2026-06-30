@@ -31,7 +31,12 @@ AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY", "YOUR_AIRTABLE_API_KEY")
 SOURCE_BASE_ID = os.getenv("AIRTABLE_BASE_ID", "YOUR_BASE_ID")
 TARGET_BASE_ID = os.getenv("AIRTABLE_BASE_ID", "YOUR_BASE_ID")
 SOURCE_TABLE_NAME = os.getenv("AIRTABLE_TABLE_NAME", "트레이더의 선택")
-SOURCE_VIEW_NAME = "마크미너비니"
+# 티커 목록을 읽어올 뷰.
+# 과거 "마크미너비니" 뷰는 사용자가 손으로 건 「활성」 체크박스 필터 때문에 0개를 반환했고,
+# 그 결과 mark.py가 처리할 티커를 못 받아 재무 데이터가 전혀 채워지지 않았다(조용한 무실행).
+# → 스캐너가 만든 전체 종목이 그대로 들어있는 Grid view(viwphkVArHJVEtIfq)에서 읽는다.
+# 필요하면 환경변수 AIRTABLE_SOURCE_VIEW 로 다른 뷰(이름 또는 ID)를 지정할 수 있다.
+SOURCE_VIEW_NAME = os.getenv("AIRTABLE_SOURCE_VIEW", "viwphkVArHJVEtIfq")
 TARGET_TABLE_NAME = os.getenv("AIRTABLE_TABLE_NAME", "트레이더의 선택")
 
 def get_tickers_from_airtable() -> List[str]:
@@ -146,6 +151,16 @@ def get_yahoo_eps_trend(ticker: str) -> Dict:
         data = t.earnings_trend
         if not isinstance(data, dict) or ticker not in data:
             return {}
+        # yahooquery가 일부 외국 ADR에 대해 추정치를 숫자가 아닌 값(문자열/NaN 등)으로
+        # 반환하면 Airtable 숫자 컬럼이 거부(422)하여 레코드 전체 업데이트가 실패한다.
+        # → 여기서 숫자로 안전 변환하고, 변환 불가/NaN은 None 으로 정리한다.
+        def num(v):
+            try:
+                f = float(v)
+            except (TypeError, ValueError):
+                return None
+            return f if f == f and f not in (float('inf'), float('-inf')) else None  # NaN/Inf 제거
+
         result = {}
         for item in data[ticker].get('trend', []):
             period = item.get('period')
@@ -154,14 +169,14 @@ def get_yahoo_eps_trend(ticker: str) -> Dict:
             est = item.get('earningsEstimate', {})
             tr = item.get('epsTrend', {})
             result[period] = {
-                'avg': est.get('avg'),
-                'year_ago_eps': est.get('yearAgoEps'),
-                'growth': est.get('growth'),  # 분수 형태 (0.51 = 51%)
-                'trend_current': tr.get('current'),
-                'trend_7d': tr.get('7daysAgo'),
-                'trend_30d': tr.get('30daysAgo'),
-                'trend_60d': tr.get('60daysAgo'),
-                'trend_90d': tr.get('90daysAgo'),
+                'avg': num(est.get('avg')),
+                'year_ago_eps': num(est.get('yearAgoEps')),
+                'growth': num(est.get('growth')),  # 분수 형태 (0.51 = 51%)
+                'trend_current': num(tr.get('current')),
+                'trend_7d': num(tr.get('7daysAgo')),
+                'trend_30d': num(tr.get('30daysAgo')),
+                'trend_60d': num(tr.get('60daysAgo')),
+                'trend_90d': num(tr.get('90daysAgo')),
             }
         return result
     except Exception as e:
@@ -661,7 +676,7 @@ def update_airtable(stock_data: List, category: str):
 
             # 한글명 결정: 기존 Airtable 캐시 > 네이버 > Claude API
             # (이미 채워진 종목은 API 호출 안 함 → 비용 절감)
-            existing_records = airtable.search('티커', ticker, view='마크미너비니')
+            existing_records = airtable.search('티커', ticker, view=SOURCE_VIEW_NAME)
             existing_korean = ''
             if existing_records:
                 existing_korean = existing_records[0]['fields'].get('한글명', '') or ''
@@ -695,6 +710,10 @@ def update_airtable(stock_data: List, category: str):
                 '시가총액': float(stock.get('market_cap', 0)),
                 '업데이트 날짜': current_date,
                 '분류': category,
+                # 재무 데이터를 채운 종목을 '활성'으로 표시한다.
+                # 프론트("마크미너비니" 뷰 viwtY7XrICnpAgyvY)가 활성=true 로 필터하므로,
+                # 이 값이 세팅돼야 미국주식 페이지에 노출된다.
+                '활성': True,
 
                 # EPS 값 추가
                 'EPS_최신분기': growth_rates['eps_values']['q1'],
